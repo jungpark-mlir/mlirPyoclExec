@@ -34,7 +34,7 @@ m0 = testMemrefAdd()
 #print(m0)
 
 # =============================================================
-# An example pipeline maps linalg ops to the gpu.
+# An example pipeline lowering linalg ops to the gpu dialect.
 # =============================================================
 def gpu_frontend(module):
     with ctx:
@@ -62,36 +62,16 @@ def gpu_to_llvm(module):
         pm.add("gpu.module(strip-debuginfo, convert-gpu-to-rocdl{use-bare-ptr-memref-call-conv=true runtime=OpenCL})")
         pm.add("rocdl-attach-target{chip=gfx1102}")
         pm.add("gpu-to-llvm{use-bare-pointers-for-kernels=true}")
-        #Not working .....
-        #pm.add("gpu-module-to-binary")
+        pm.add("gpu-module-to-binary")
         pm.run(module.operation)
         return module
 
 m2 = gpu_to_llvm(m1)
 #print(m2)
 
-# =============================================================
-# Serialize llvm dialect from host tool, requires mlir-opt
-# FIXME : calling the same pass from python binding fails.
-# =============================================================
-serialize_cmd = "./mlir-opt -gpu-module-to-binary"
-proc = sp.Popen([serialize_cmd], shell=True, stdin=sp.PIPE, stdout=sp.PIPE)
-proc.stdin.write(bytes(str(m2), 'ascii'))
-m3_str = proc.communicate()[0].decode()
-proc.stdout.close()
-
-# Parse the compiled string and extract the gpu binary.
-def parse_module(ir_string):
-    with ctx:
-        module = Module.parse(ir_string)
-    return module
-
-m3 = parse_module(m3_str)
-#print(m3)
-
 # FIXME : find interface to access binary. (Possibly not needed if host part is handled in MLIR)
 # For now, this code tries to extract binary from the string
-gpu_obj = m3.body.operations[1].objects[0]
+gpu_obj = m2.body.operations[1].objects[0]
 obj_str = str(gpu_obj)
 x0 = obj_str.partition("bin = \"\\")
 x1 = x0[2].partition("\">")
@@ -128,7 +108,7 @@ buf_result = cl.Buffer(ctx, mf.WRITE_ONLY, data_result.nbytes)
 
 devs = cl.get_platforms()[0].get_devices()
 prg = cl.Program(ctx, devs, [compiled_bin]).build()
-kernel = prg.vadd_kernel
+kernel = cl.Kernel(prg, "vadd_kernel")
 
 kernel.set_args(buf_A, buf_B, buf_result)
 gsize = (1024, 1, 1)
